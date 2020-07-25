@@ -40,6 +40,20 @@ def get_continent_data():
     return continents
 
 
+def get_continent_data_from_file():
+    continents = gpd.read_file('continent_shapefile/continent.shp')
+    continents = continents[continents.CONTINENT != 'Antarctica']
+    continents = continents.to_crs("EPSG:6933")
+    return continents
+
+
+def get_country_data():
+    countries = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+    countries = countries[countries.continent != 'Antarctica']
+    countries = countries.to_crs("EPSG:6933")
+    return countries
+
+
 def gen_grid(delta):
     outline = get_continent_data()
     xmin, ymin, xmax, ymax = outline.total_bounds
@@ -62,18 +76,42 @@ def gen_grid(delta):
     return grid_clip
 
 
-def overlay_and_sum(num_of_species, delta=(300000, 300000)):
+def overlay_and_sum_grid(num_of_species, delta=(300000, 300000)):
     geo_data = get_data(num_of_species)
     grid = gen_grid(delta)
-    inter = gpd.overlay(geo_data, grid, how='union')
+    inter = overlay_and_sum(geo_data, grid)
+    inter_grouped = inter.groupby(['grid_index']).sum()
+    inter_grouped = gpd.GeoDataFrame(inter_grouped.merge(grid, on='grid_index'))
+    inter_grouped = inter_grouped.assign(total_mass_Mt=inter_grouped.total_mass * 10 ** (-12))
+    return inter_grouped
+
+
+def overlay_and_sum_continent(num_of_species):
+    geo_data = get_data(num_of_species)
+    polygon_layer = get_continent_data_from_file()
+    inter = overlay_and_sum(geo_data, polygon_layer)
+    inter_grouped = inter.groupby(['CONTINENT']).sum()
+    inter_grouped = gpd.GeoDataFrame(inter_grouped.merge(polygon_layer, on='CONTINENT'))
+    inter_grouped = inter_grouped.assign(total_mass_Mt=inter_grouped.total_mass * 10 ** (-12))
+    return inter_grouped
+
+
+def overlay_and_sum_country(num_of_species):
+    geo_data = get_data(num_of_species)
+    polygon_layer = get_country_data()
+    inter = overlay_and_sum(geo_data, polygon_layer)
+    inter_grouped = inter.groupby(['name']).sum()
+    inter_grouped = gpd.GeoDataFrame(inter_grouped.merge(polygon_layer, on='name'))
+    inter_grouped = inter_grouped.assign(total_mass_Mt=inter_grouped.total_mass * 10 ** (-12))
+    return inter_grouped
+
+
+def overlay_and_sum(geo_data, layer):
+    inter = gpd.overlay(geo_data, layer, how='union')
     inter = inter.assign(area_km_2=inter.geometry.area * 10 ** (-6))
     inter = inter.assign(population=inter.pop_density * inter.area_km_2)
     inter = inter.assign(total_mass=inter.population * inter.AdultBodyMassG)
-    inter_grouped = inter.groupby(['grid_index']).sum()
-    inter_grouped = inter_grouped.merge(grid, on='grid_index')
-    inter_grouped = gpd.GeoDataFrame(inter_grouped)
-    inter_grouped = inter_grouped.assign(total_mass_Mt=inter_grouped.total_mass * 10 ** (-12))
-    return inter_grouped
+    return inter
 
 
 def gen_grid_plot(gridded_data):
